@@ -5,9 +5,9 @@ import streamlit as st
 FEEDS = {
     "nhk": "https://www3.nhk.or.jp/rss/news/cat6.xml",
     "reuters": [
-        "https://feeds.reuters.com/reuters/energy",
-        "https://feeds.reuters.com/reuters/businessNews",
-        "https://www.reutersagency.com/feed/?best-topics=energy&post_type=best",
+        "https://feeds.content.dowjones.io/public/rss/mw-realtimeheadlines",
+        "https://rss.app/feeds/tRWNGhBzZCH2Vpqz.xml",  # Reuters energy via RSS aggregator
+        "https://feeds.feedburner.com/reuters/energy",
     ],
     "nikkei": "https://asia.nikkei.com/rss/feed/nar",
 }
