@@ -69,7 +69,7 @@ col_logo, col_title, col_ts = st.columns([1, 6, 2])
 with col_logo:
     st.markdown("## 🛢️")
 with col_title:
-    st.markdown("# Japan Oil & Gas Monitor")
+    st.markdown("# Nippon-42: Japan Oil & Gas Monitor")
     st.markdown("*Real-time intelligence on Japan's petroleum sector*")
 with col_ts:
     st.markdown(f"<div class='timestamp'>Last updated:<br>{datetime.datetime.now().strftime('%b %d, %Y %H:%M JST')}</div>", unsafe_allow_html=True)
