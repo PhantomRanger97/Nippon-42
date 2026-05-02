@@ -6,45 +6,120 @@ import plotly.graph_objects as go
 import io
 import re
 import streamlit as st
-from deep_translator import GoogleTranslator
 
 BASE_URL = "https://www.enecho.meti.go.jp/statistics/petroleum_and_lpgas/pl001/results.html"
 PDF_ROOT = "https://www.enecho.meti.go.jp"
 
-@st.cache_data(ttl=86400 * 7)  # weekly cache (PDF updates monthly)
+STOCKPILE_LABELS = {
+    "国家備蓄": "National Reserve",
+    "民間備蓄": "Commercial Reserve",
+    "産油国共同備蓄": "Joint Producer Reserve",
+    "合計": "Total",
+    "原油": "Crude Oil",
+    "製品": "Products",
+    "ガソリン": "Gasoline",
+    "灯油": "Kerosene",
+    "軽油": "Diesel",
+    "重油": "Heavy Oil",
+}
+
+def translate_label(text):
+    for jp, en in STOCKPILE_LABELS.items():
+        if jp in text:
+            return en
+    return text
+
+@st.cache_data(ttl=86400 * 7)
 def get_meti_stockpile_data():
     try:
-        resp = requests.get(BASE_URL, timeout=15)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(BASE_URL, headers=headers, timeout=15)
         soup = BeautifulSoup(resp.text, "lxml")
-        # Grab the first (most recent) PDF link
-        pdf_links = [a["href"] for a in soup.find_all("a", href=True) if "oil.pdf" in a["href"]]
+
+        pdf_links = [
+            a["href"] for a in soup.find_all("a", href=True)
+            if "oil.pdf" in a["href"]
+        ]
         if not pdf_links:
             return None
-        pdf_url = PDF_ROOT + pdf_links[0]
-        pdf_resp = requests.get(pdf_url, timeout=20)
-        
-        with pdfplumber.open(io.BytesIO(pdf_resp.content)) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-            tables = []
-            for page in pdf.pages:
-                t = page.extract_table()
-                if t:
-                    tables.append(t)
 
-        # Build a simple visualization from extracted text (stockpile numbers)
-        # Real parsing will depend on table structure — this is a scaffold
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"Latest METI PDF parsed.<br>Table data extracted — configure pandas parsing to your PDF structure.",
-            xref="paper", yref="paper", x=0.5, y=0.5,
-            showarrow=False, font=dict(size=14, color="white")
-        )
+        pdf_url = PDF_ROOT + pdf_links[0]
+        pdf_resp = requests.get(pdf_url, headers=headers, timeout=20)
+
+        rows = []
+        with pdfplumber.open(io.BytesIO(pdf_resp.content)) as pdf:
+            for page in pdf.pages:
+                table = page.extract_table()
+                if table:
+                    for row in table:
+                        if row and any(cell for cell in row if cell):
+                            rows.append(row)
+
+        if not rows:
+            return _placeholder_chart("PDF parsed but no table data found.")
+
+        # Build DataFrame from raw rows
+        df = pd.DataFrame(rows)
+        df = df.dropna(how="all").reset_index(drop=True)
+
+        # Extract numeric values — look for rows with numbers
+        chart_data = []
+        for _, row in df.iterrows():
+            cells = [str(c).strip() if c else "" for c in row]
+            label = cells[0] if cells else ""
+            nums = []
+            for c in cells[1:]:
+                clean = re.sub(r"[^\d.]", "", c)
+                if clean:
+                    try:
+                        nums.append(float(clean))
+                    except ValueError:
+                        pass
+            if label and nums:
+                chart_data.append({
+                    "label": translate_label(label),
+                    "value": nums[0]
+                })
+
+        if not chart_data:
+            return _placeholder_chart("Data extracted but could not parse numeric values.")
+
+        chart_df = pd.DataFrame(chart_data[:12])  # top 12 rows max
+
+        fig = go.Figure(go.Bar(
+            x=chart_df["value"],
+            y=chart_df["label"],
+            orientation="h",
+            marker_color="#e8a020",
+            text=chart_df["value"].apply(lambda x: f"{x:,.0f}"),
+            textposition="outside",
+        ))
         fig.update_layout(
-            title="Japan Petroleum Stockpile Status (METI)",
+            title="Japan Petroleum Stockpile Status (Latest METI Report)",
+            xaxis_title="Volume (kiloliters)",
+            yaxis_title="",
             paper_bgcolor="#1c2333",
             plot_bgcolor="#1c2333",
-            font_color="white"
+            font=dict(color="white", size=12),
+            height=450,
+            margin=dict(l=160, r=40, t=60, b=40),
         )
         return fig
+
     except Exception as e:
-        return None
+        return _placeholder_chart(f"Error loading METI data: {str(e)}")
+
+def _placeholder_chart(message):
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5, showarrow=False,
+        font=dict(size=13, color="#aab8d0")
+    )
+    fig.update_layout(
+        paper_bgcolor="#1c2333",
+        plot_bgcolor="#1c2333",
+        height=300
+    )
+    return fig
