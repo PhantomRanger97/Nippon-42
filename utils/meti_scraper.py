@@ -1,19 +1,13 @@
-import requests
 import pdfplumber
 import pandas as pd
 import plotly.graph_objects as go
 import io
 import re
+import os
 import streamlit as st
-from datetime import datetime
 
-# Hardcoded recent PDF URLs — update monthly when new one is released
-# Format: YYMMDD + oil.pdf
-KNOWN_PDFS = [
-    "https://www.enecho.meti.go.jp/statistics/petroleum_and_lpgas/pl001/pdf/2026/260317oil.pdf",
-    "https://www.enecho.meti.go.jp/statistics/petroleum_and_lpgas/pl001/pdf/2026/260216oil.pdf",
-    "https://www.enecho.meti.go.jp/statistics/petroleum_and_lpgas/pl001/pdf/2026/260115oil.pdf",
-]
+# Local PDF path — commit the latest monthly PDF to your repo as data/latest_oil.pdf
+LOCAL_PDF_PATH = "data/latest_oil.pdf"
 
 STOCKPILE_LABELS = {
     "国家備蓄": "National Reserve",
@@ -36,31 +30,17 @@ def translate_label(text):
 
 @st.cache_data(ttl=86400 * 7)
 def get_meti_stockpile_data():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/pdf,*/*",
-        "Referer": "https://www.enecho.meti.go.jp/",
-    }
-
-    pdf_content = None
-    used_url = None
-
-    for pdf_url in KNOWN_PDFS:
-        try:
-            resp = requests.get(pdf_url, headers=headers, timeout=30)
-            if resp.status_code == 200 and len(resp.content) > 1000:
-                pdf_content = resp.content
-                used_url = pdf_url
-                break
-        except Exception:
-            continue
-
-    if not pdf_content:
-        return _placeholder_chart("METI PDF could not be retrieved. Japanese government servers may be blocking cloud access.")
-
+    if not os.path.exists(LOCAL_PDF_PATH):
+        return _placeholder_chart(
+            "METI PDF not found. Download the latest PDF from enecho.meti.go.jp "
+            "and commit it to your repo as data/latest_oil.pdf"
+        )
     try:
+        with open(LOCAL_PDF_PATH, "rb") as f:
+            pdf_bytes = f.read()
+
         rows = []
-        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
                 table = page.extract_table()
                 if table:
@@ -69,7 +49,7 @@ def get_meti_stockpile_data():
                             rows.append(row)
 
         if not rows:
-            return _placeholder_chart("PDF opened but no table data extracted.")
+            return _placeholder_chart("PDF opened but no table data found.")
 
         df = pd.DataFrame(rows)
         df = df.dropna(how="all").reset_index(drop=True)
@@ -93,7 +73,7 @@ def get_meti_stockpile_data():
                 })
 
         if not chart_data:
-            return _placeholder_chart("PDF parsed but numeric data could not be extracted.")
+            return _placeholder_chart("Could not parse numeric data from PDF.")
 
         chart_df = pd.DataFrame(chart_data[:12])
         fig = go.Figure(go.Bar(
@@ -105,7 +85,7 @@ def get_meti_stockpile_data():
             textposition="outside",
         ))
         fig.update_layout(
-            title=f"Japan Petroleum Stockpile — Latest METI Report ({used_url.split('/')[-1].replace('oil.pdf','')})",
+            title="Japan Petroleum Stockpile Status (Latest METI Report)",
             xaxis_title="Volume (kiloliters)",
             paper_bgcolor="#1c2333",
             plot_bgcolor="#1c2333",
@@ -116,7 +96,7 @@ def get_meti_stockpile_data():
         return fig
 
     except Exception as e:
-        return _placeholder_chart(f"PDF parse error: {str(e)[:80]}")
+        return _placeholder_chart(f"Error reading PDF: {str(e)[:80]}")
 
 def _placeholder_chart(message):
     fig = go.Figure()
