@@ -32,8 +32,12 @@ def translate_label(text):
 @st.cache_data(ttl=86400 * 7)
 def get_meti_stockpile_data():
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(BASE_URL, headers=headers, timeout=15)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+        }
+        resp = requests.get(BASE_URL, headers=headers, timeout=30)
         soup = BeautifulSoup(resp.text, "lxml")
 
         pdf_links = [
@@ -41,10 +45,10 @@ def get_meti_stockpile_data():
             if "oil.pdf" in a["href"]
         ]
         if not pdf_links:
-            return None
+            return _placeholder_chart("No PDF links found on METI page.")
 
         pdf_url = PDF_ROOT + pdf_links[0]
-        pdf_resp = requests.get(pdf_url, headers=headers, timeout=20)
+        pdf_resp = requests.get(pdf_url, headers=headers, timeout=30)
 
         rows = []
         with pdfplumber.open(io.BytesIO(pdf_resp.content)) as pdf:
@@ -56,13 +60,11 @@ def get_meti_stockpile_data():
                             rows.append(row)
 
         if not rows:
-            return _placeholder_chart("PDF parsed but no table data found.")
+            return _placeholder_chart("PDF opened but no table data found.")
 
-        # Build DataFrame from raw rows
         df = pd.DataFrame(rows)
         df = df.dropna(how="all").reset_index(drop=True)
 
-        # Extract numeric values — look for rows with numbers
         chart_data = []
         for _, row in df.iterrows():
             cells = [str(c).strip() if c else "" for c in row]
@@ -75,17 +77,16 @@ def get_meti_stockpile_data():
                         nums.append(float(clean))
                     except ValueError:
                         pass
-            if label and nums:
+            if label and nums and len(label) > 1:
                 chart_data.append({
                     "label": translate_label(label),
                     "value": nums[0]
                 })
 
         if not chart_data:
-            return _placeholder_chart("Data extracted but could not parse numeric values.")
+            return _placeholder_chart("Could not parse numeric data from PDF.")
 
-        chart_df = pd.DataFrame(chart_data[:12])  # top 12 rows max
-
+        chart_df = pd.DataFrame(chart_data[:12])
         fig = go.Figure(go.Bar(
             x=chart_df["value"],
             y=chart_df["label"],
@@ -97,7 +98,6 @@ def get_meti_stockpile_data():
         fig.update_layout(
             title="Japan Petroleum Stockpile Status (Latest METI Report)",
             xaxis_title="Volume (kiloliters)",
-            yaxis_title="",
             paper_bgcolor="#1c2333",
             plot_bgcolor="#1c2333",
             font=dict(color="white", size=12),
@@ -106,8 +106,10 @@ def get_meti_stockpile_data():
         )
         return fig
 
+    except requests.exceptions.Timeout:
+        return _placeholder_chart("METI server timed out. Will retry on next refresh.")
     except Exception as e:
-        return _placeholder_chart(f"Error loading METI data: {str(e)}")
+        return _placeholder_chart(f"Error: {str(e)[:80]}")
 
 def _placeholder_chart(message):
     fig = go.Figure()
@@ -120,6 +122,6 @@ def _placeholder_chart(message):
     fig.update_layout(
         paper_bgcolor="#1c2333",
         plot_bgcolor="#1c2333",
-        height=300
+        height=200
     )
     return fig
