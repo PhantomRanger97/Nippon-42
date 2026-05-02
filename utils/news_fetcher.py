@@ -4,7 +4,7 @@ import streamlit as st
 
 FEEDS = {
     "nhk": "https://www3.nhk.or.jp/rss/news/cat6.xml",
-    "reuters": "https://feeds.reuters.com/reuters/businessNews",
+    "reuters": "https://feeds.reuters.com/reuters/energy",  # dedicated energy feed
     "nikkei": "https://asia.nikkei.com/rss/feed/nar",
 }
 
@@ -13,6 +13,7 @@ OIL_KEYWORDS = [
     "refinery", "opec", "fuel", "barrel", "stockpile", "eneos",
     "idemitsu", "cosmo", "inpex", "jogmec", "meti", "nuclear",
     "renewable", "carbon", "emission", "pipeline", "tanker",
+    "supply", "demand", "price", "japan", "asia",
     "石油", "原油", "エネルギー", "ガス", "備蓄"
 ]
 
@@ -20,14 +21,14 @@ def is_relevant(title, summary=""):
     combined = (title + " " + summary).lower()
     return any(kw.lower() in combined for kw in OIL_KEYWORDS)
 
-def parse_feed(url, translate=False):
+def parse_feed(url, translate=False, filter_keywords=True):
     try:
         feed = feedparser.parse(url)
         articles = []
-        for entry in feed.entries[:30]:  # scan more, filter down
+        for entry in feed.entries[:30]:
             title = entry.get("title", "")
             summary = entry.get("summary", "")
-            if not is_relevant(title, summary):
+            if filter_keywords and not is_relevant(title, summary):
                 continue
             if translate:
                 try:
@@ -50,7 +51,7 @@ def parse_feed(url, translate=False):
 @st.cache_data(ttl=21600)
 def get_all_news():
     return {
-        "nhk": parse_feed(FEEDS["nhk"], translate=True),
-        "reuters": parse_feed(FEEDS["reuters"]),
-        "nikkei": parse_feed(FEEDS["nikkei"]),
+        "nhk": parse_feed(FEEDS["nhk"], translate=True, filter_keywords=True),
+        "reuters": parse_feed(FEEDS["reuters"], filter_keywords=False),  # already energy-specific
+        "nikkei": parse_feed(FEEDS["nikkei"], filter_keywords=True),
     }
