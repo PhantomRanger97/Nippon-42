@@ -1,13 +1,18 @@
 import feedparser
-import requests
-from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
 import streamlit as st
 
-# JOGMEC publishes press releases via RSS — more reliable than scraping JS site
-JOGMEC_RSS = "https://www.jogmec.go.jp/rss/news.xml"
-JOGMEC_FALLBACK_URL = "https://www.jogmec.go.jp/news/release/index.html"
-BASE = "https://www.jogmec.go.jp"
+# JOGMEC RSS feeds
+JOGMEC_FEEDS = [
+    "https://www.jogmec.go.jp/rss/news.xml",
+    "https://www.jogmec.go.jp/rss/press.xml",
+]
+
+OIL_KEYWORDS = [
+    "oil", "gas", "lng", "petroleum", "crude", "energy",
+    "石油", "天然ガス", "原油", "エネルギー", "LNG", "掘削",
+    "exploration", "production", "refin", "stockpile", "reserve"
+]
 
 def translate(text):
     try:
@@ -15,56 +20,45 @@ def translate(text):
     except Exception:
         return text
 
+def is_relevant(title):
+    return any(kw.lower() in title.lower() for kw in OIL_KEYWORDS)
+
 @st.cache_data(ttl=86400 * 2)
 def get_jogmec_data():
     articles = []
 
-    # Try RSS first
-    try:
-        feed = feedparser.parse(JOGMEC_RSS)
-        for entry in feed.entries[:8]:
-            title_jp = entry.get("title", "")
-            link = entry.get("link", "#")
-            summary_jp = entry.get("summary", "")
-            if len(title_jp) < 5:
-                continue
-            articles.append({
-                "title": translate(title_jp),
-                "link": link,
-                "snippet": translate(summary_jp[:400]) if summary_jp else "",
-            })
-    except Exception:
-        pass
-
-    # Fallback: scrape HTML press release page
-    if not articles:
+    for feed_url in JOGMEC_FEEDS:
         try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = requests.get(JOGMEC_FALLBACK_URL, headers=headers, timeout=15)
-            soup = BeautifulSoup(resp.text, "lxml")
-            for a in soup.find_all("a", href=True)[:15]:
-                title_jp = a.get_text(strip=True)
-                link = a["href"]
-                if len(title_jp) < 10:
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:20]:
+                title_jp = entry.get("title", "")
+                link = entry.get("link", "#")
+                summary_jp = entry.get("summary", "")
+                date = entry.get("published", "")[:16]
+                if len(title_jp) < 5:
                     continue
-                if not link.startswith("http"):
-                    link = BASE + link
+                title_en = translate(title_jp)
+                snippet_en = translate(summary_jp[:400]) if summary_jp else ""
                 articles.append({
-                    "title": translate(title_jp),
+                    "title": title_en,
                     "link": link,
-                    "snippet": "",
+                    "snippet": snippet_en,
+                    "date": date,
                 })
-                if len(articles) >= 6:
+                if len(articles) >= 8:
                     break
         except Exception:
-            pass
+            continue
+        if articles:
+            break
 
     if not articles:
-        return "_No JOGMEC data available at this time._"
+        return "_No JOGMEC press releases available at this time. [Visit JOGMEC directly](https://www.jogmec.go.jp/news/release/index.html)_"
 
     output = []
     for art in articles:
-        output.append(f"""**[{art['title']}]({art['link']})**
+        date_str = f" *{art['date']}*" if art['date'] else ""
+        output.append(f"""**[{art['title']}]({art['link']})**{date_str}
 
 {art['snippet'] if art['snippet'] else '_No preview available_'}
 
